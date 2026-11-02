@@ -1,0 +1,46 @@
+[package]
+name = "rust-preview-pipeline"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+license = "MIT"
+description = "Configurable video-to-GIF pipeline with durable jobs"
+
+[features]
+default = ["http"]
+http = ["dep:axum", "dep:tower-http"]
+
+[dependencies]
+axum = { version = "0.8", optional = true }
+clap = { version = "4", features = ["derive"] }
+config = { version = "0.15", default-features = false, features = ["toml"] }
+fs2 = "0.4"
+futures-util = "0.3"
+http = "1"
+object_store = { version = "0.14", features = ["aws", "fs"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sysinfo = "0.37"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs", "io-util", "sync", "time", "signal", "net"] }
+tokio-util = { version = "0.7", features = ["rt", "io"] }
+tower-http = { version = "0.6", features = ["fs", "limit"], optional = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+url = { version = "2", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31", features = ["signal", "process"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[[bin]]
+name = "preview-pipeline"
+path = "src/main.rs"

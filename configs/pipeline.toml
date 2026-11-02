@@ -1,0 +1,359 @@
+# Useful information before changing this configuration:
+#
+# Configuration priority: built-in defaults < this file < PREVIEW__... environment variables.
+# Jobs may override recipe settings, but cannot exceed the deployment limits under [execution].
+# Unknown fields and invalid values are rejected. Optional settings are shown as commented examples.
+#
+# Paths are relative to the process working directory, not the directory containing this file.
+# A second is 1,000 milliseconds. A MiB is 1,048,576 bytes; a GiB is 1,073,741,824 bytes.
+# Fields ending in _seconds are whole seconds unless their example uses a decimal.
+# In [recipe] and [recipes.NAME], times and FPS support decimals.
+# Do not assume 0 means disabled: the exceptions are explained beside each option.
+#
+# Deployment settings are loaded when a process starts; restart the affected CLI/API/worker process
+# to apply changes. Queued jobs retain their submitted recipe and are checked against current limits.
+# Credentials belong in environment variables or the supported identity providers, not in this file.
+
+
+# --- Runtime files and logging ---
+
+# SQLite file that stores jobs, active-task deduplication and shared interactive activity.
+# Clients and the worker owner must use the same database to share tasks and scheduling activity.
+database = ".pipeline/jobs.sqlite"
+
+# Directory for per-job input copies and intermediate GIFs.
+# Allow enough disk space for concurrent inputs; each input may approach max_input_bytes.
+# Normal completion/cancellation removes per-job files. A forced process kill can leave files behind.
+temp_dir = ".pipeline/tmp"
+
+# Log filter. Common levels: error, warn, info, debug, trace.
+# More verbose levels produce more console output; this does not change task priority or retries.
+log_level = "info"
+
+
+# --- Default conversion recipe ---
+# Used when a job does not select a named recipe. These are starting values you can change.
+# Recipe settings control the requested output; [execution] sets the maximum permitted resource use.
+[recipe]
+
+# Where to start reading the video, in seconds. Decimals are allowed; valid range: 0..604800.
+# 0 starts at the beginning. Seeking past the available video does not produce a valid preview.
+start_seconds = 0.0
+
+# Maximum clip length, in seconds. Decimals are allowed; valid range: 0.01..3600.
+# Must also be <= execution.max_duration_seconds. A shorter input produces a shorter clip.
+# Longer clips contain more frames and usually require more encoding work and a larger GIF.
+duration_seconds = 5.0
+
+# Output frames per second. Decimals are allowed; valid range: 0.1..100.
+# Must also be <= execution.max_fps. Higher values make motion smoother and produce more frames.
+fps = 5.0
+
+# Optional output width, in pixels: 2..8192 and <= execution.max_dimension.
+# When omitted, width is derived from the configured height while preserving aspect ratio.
+# When width and height are both set, fit determines how they are used.
+# width = 426
+
+# Output height, in pixels: 2..8192 and <= execution.max_dimension.
+# In this default recipe only height is set, so the source aspect ratio determines width.
+# 0 is invalid here; clearing a dimension with 0 is supported only in per-job overrides.
+height = 240
+
+# Resizing filter: lanczos, bicubic, bilinear, fast_bilinear, neighbor.
+# This changes image resampling, not the requested dimensions or FPS.
+scale = "lanczos"
+
+# Used when both width and height are configured.
+# contain: preserve aspect ratio inside the requested box, with dimensions divisible by 2.
+# stretch: use the exact requested dimensions, which may change the source aspect ratio.
+fit = "contain"
+
+# GIF palette mode: default or optimized.
+# default uses the encoder's normal palette handling.
+# optimized generates a palette from the clip, then applies colors and dither below.
+palette = "default"
+
+# Color dithering in optimized palette mode: sierra2_4a, bayer, floyd_steinberg, none.
+# Dithering changes how limited colors are distributed. This option has no effect in default mode.
+dither = "sierra2_4a"
+
+# Maximum palette colors in optimized mode. Whole number: 2..256.
+# Lower values restrict the palette; visual quality and GIF size depend on the source content.
+# This option has no effect when palette is default.
+colors = 256
+
+# GIF looping: 0 loops indefinitely, -1 disables looping, 1..65535 sets the loop count.
+loop_count = 0
+
+# Zero-based video-stream index: 0 selects the first video stream, 1 the second, and so on.
+# This counts video streams only, not audio streams. The selected stream must exist in the input.
+video_stream = 0
+
+
+# --- Named recipe example ---
+# Select this profile by submitting a job with "recipe": "detailed".
+# Add another profile with [recipes.YOUR_NAME].
+# Omitted fields use built-in recipe defaults; they do not inherit edits from [recipe].
+[recipes.detailed]
+
+# Clip length in seconds; subject to the same bounds and deployment limit as recipe.duration_seconds.
+duration_seconds = 5.0
+
+# Frames per second; subject to execution.max_fps.
+fps = 10.0
+
+# Height in pixels; subject to execution.max_dimension. Width is derived when omitted.
+height = 360
+
+# Generate and apply a clip-specific palette. Other omitted palette options use built-in defaults.
+palette = "optimized"
+
+
+# --- Media executables and deployment limits ---
+# Limits are checked for the default recipe, every named recipe and per-job overrides.
+# Raising a limit permits larger requests; it does not change the recipe by itself.
+[execution]
+
+# Encoder executable name or path. A name without a directory is resolved through PATH.
+# This is a trusted deployment setting; a submitted job cannot replace the executable.
+ffmpeg = "ffmpeg"
+
+# Probe executable name or path. Used to inspect the staged input and validate generated output.
+ffprobe = "ffprobe"
+
+# Thread count passed to decoding, filtering and encoding. Whole number: 1..256.
+# 0 is invalid, not automatic. Tune this together with scheduler.concurrency.
+threads = 1
+
+# Deadline in whole seconds for EACH media stage: input probe, encoding and output probe.
+# Includes process exit and captured stdout completion. Valid range: 1..604800.
+# Increasing this allows slower jobs to run longer; it is not a total job/retry deadline.
+timeout_seconds = 90
+
+# Deadline in whole seconds for EACH I/O stage: input staging, cache lookup and output publication.
+# Valid range: 1..604800. Input staging includes the complete download/copy.
+# Raise this if permitted large inputs need longer to transfer; retries have separate attempts.
+io_timeout_seconds = 120
+
+# Maximum accepted input size, in bytes. Positive whole number; 0 is invalid.
+# Default: 2 GiB. Larger limits require more temporary disk space, especially with multiple workers.
+max_input_bytes = 2147483648
+
+# Maximum accepted GIF size, in bytes. Positive whole number; 0 is invalid.
+# Default: 64 MiB. Oversized output fails instead of being published.
+max_output_bytes = 67108864
+
+# Deployment cap on the requested clip length, in seconds. Must be positive; decimals are allowed.
+# Requests are also subject to the recipe's absolute 3600-second validation bound.
+max_duration_seconds = 60.0
+
+# Deployment cap on output FPS. Must be positive; decimals are allowed.
+# Recipe FPS must satisfy both this limit and the absolute range 0.1..100.
+max_fps = 30.0
+
+# Maximum permitted output width OR height, in pixels. Whole number, at least 2.
+# Derived dimensions are checked even on cache hits; newly generated dimensions are probed again.
+max_dimension = 1920
+
+# Comma-separated FFmpeg demuxer names accepted for input inspection and encoding.
+# mov covers MP4/MOV inputs. Only enable formats your deployment needs and can decode.
+format_whitelist = "mov,matroska,avi,mpegts,flv,ogg"
+
+
+# --- Task scheduling ---
+# Priority order: visible > prefetch > background. Running work is not preempted by a new priority.
+# One process owns the workers for each database; concurrency controls workers inside that owner.
+[scheduler]
+
+# Simultaneous workers. Whole number: 1..256.
+# Higher values allow more simultaneous jobs and increase CPU, memory and temporary disk demand.
+concurrency = 1
+
+# Maximum active jobs: queued + generating. Whole number: 1..1000000.
+# When full, new distinct submissions are rejected. Ready, error and cancelled jobs do not count.
+# This does not limit stored job history or retained GIFs.
+queue_capacity = 1024
+
+# How often an idle worker checks for eligible work, in milliseconds. Whole number: 10..60000.
+# Lower values can reduce pickup delay but cause more database checks.
+# Independent CLI processes rely on this polling to make newly submitted work visible to the owner.
+poll_ms = 200
+
+# How long visible priority lasts without renewal, in whole seconds: 1..604800.
+# After expiry, queued visible work becomes prefetch. Renew by setting the job's priority to visible.
+visible_lease_seconds = 6
+
+# Maximum queued prefetch jobs retained at that priority. Positive whole number.
+# Excess prefetch jobs are demoted to background; they are not discarded.
+# Total active admission is controlled separately by queue_capacity.
+prefetch_limit = 12
+
+# Allow workers to take background jobs?
+# false pauses background work, including demoted prefetch jobs. It does not cancel those jobs.
+# Foreground work can still run. When true, all background conditions below must also pass.
+background_enabled = true
+
+# Required time since the latest interactive submission, priority update or activity notification.
+# Whole seconds: 0..604800. 0 disables this idle-time gate.
+# Activity is shared through SQLite, including submissions from independent CLI processes.
+# Starting a worker owner also starts a new idle window.
+background_idle_seconds = 30
+
+# Delay before the SAME worker takes another background job, in whole seconds: 0..604800.
+# 0 disables cooldown. Visible and prefetch jobs remain eligible during this delay.
+background_cooldown_seconds = 3
+
+# Maximum one-minute system load divided by the available CPU count. Must be positive.
+# Example: 0.35 permits a load of 1.4 on a four-CPU host. This is not a CPU-utilization percentage.
+# Lower values admit background work on quieter hosts; higher values tolerate a busier host.
+background_max_load_ratio = 0.35
+
+# Available SYSTEM memory required before taking background work, in MiB (despite the _mb suffix).
+# Whole number >= 0. 0 disables this memory gate; it is not a per-worker memory limit.
+background_min_memory_mb = 512
+
+# Maximum execution attempts, including the first attempt. Whole number: 1..100.
+# 1 means no retry. Only retryable failures use additional attempts; invalid recipes do not retry.
+max_attempts = 3
+
+# Delay before the first execution retry, in whole seconds. Must be >= 1.
+# Later retry delays double until retry_max_seconds is reached.
+retry_initial_seconds = 2
+
+# Maximum execution retry delay, in whole seconds: retry_initial_seconds..604800.
+# This caps the delay, not the number of attempts.
+retry_max_seconds = 60
+
+# Maximum attempts to commit a final job outcome to SQLite. Whole number: 1..100.
+# Separate from max_attempts: retrying the commit does not re-encode the video.
+# If all commits fail, the owner stops so the database fault can be resolved before restart/recovery.
+commit_max_attempts = 3
+
+# Fixed delay between final-state commit attempts, in whole seconds: 1..604800.
+# Graceful shutdown can wait for this commit budget; this is not the execution retry backoff.
+commit_retry_seconds = 1
+
+
+# --- Artifact cache ---
+[cache]
+
+# Source identity: content or metadata.
+# content hashes the staged bytes; metadata uses file metadata, a strong HTTP ETag or S3 version/ETag.
+# Use metadata only when source validators reliably change with the source content.
+# Missing remote validators fall back to a content hash. BOTH modes still stage and probe the input.
+fingerprint = "content"
+
+# Non-empty cache identity namespace. Effective recipe settings are also part of the cache key.
+# Change this when conversion semantics change. Previous cache objects are not automatically deleted.
+namespace = "gif-v1"
+
+# Cache-Control header for HTTP GIF responses and S3 object metadata.
+# max-age is in seconds. This controls client/proxy caching, not the worker's cache expiry below.
+cache_control = "public, max-age=31536000, immutable"
+
+# Optional cache age limit, in positive whole seconds. Example: 86400 is one day.
+# Omit this setting for no age limit. 0 is invalid, not disabled.
+# Expiry is checked on reuse and causes regeneration; it does not periodically delete old objects.
+# ttl_seconds = 86400
+
+
+# --- Allowed input sources ---
+[inputs]
+
+# Directories from which local input files may be read. Symlinks are resolved before checking roots.
+# Relative paths use the process working directory. [] disables local-file input.
+local_roots = ["."]
+
+# Exact HTTP input hostnames, without scheme, port or path. Wildcards are not supported.
+# Example: ["media.example.com", "archive.example.com"]. [] disables HTTP/HTTPS input.
+# HTTP redirects are not followed, and ambient HTTP proxies are not used for these downloads.
+http_hosts = []
+
+# Permit HTTP inputs resolving to private, loopback or other otherwise-disallowed IP addresses?
+# This does not bypass http_hosts. Enable only when those destinations are intended input sources.
+allow_private_ips = false
+
+# Permit plain HTTP input URLs in addition to HTTPS?
+# This applies to HTTP inputs only. Each named S3 store has its own allow_http setting.
+allow_http = false
+
+
+# --- Artifact destination ---
+# Choose one output variant. A complete S3 alternative is shown at the end of this file.
+[output]
+
+# local writes to root below. s3 requires store, prefix and signed_url_seconds instead of root.
+kind = "local"
+
+# Destination directory for local GIF artifacts. Publication uses an atomic same-directory rename.
+# This directory can grow as new content/recipes are processed; cache TTL is not automatic cleanup.
+root = ".pipeline/artifacts"
+
+
+# --- Optional HTTP service ---
+# Used by the serve command. The run and worker commands do not start an HTTP listener.
+[server]
+
+# IP address and port to bind. Loopback may run without a token.
+# A non-loopback address requires token_env. Changing this requires restarting the HTTP service.
+listen = "127.0.0.1:8787"
+
+# Maximum HTTP JSON request body, in bytes. Whole number: 1..16777216 (16 MiB).
+# This limits submitted JSON, not video input size; video size is limited by max_input_bytes.
+max_body_bytes = 65536
+
+# Optional NAME of the environment variable holding the API bearer token, not the token itself.
+# When configured, the variable must be set and non-empty; all routes, including /health, require it.
+# token_env = "PREVIEW_API_TOKEN"
+
+
+# --- Optional named S3-compatible store ---
+# Uncomment this entire block to configure a store named media.
+# Jobs can use it as an input, and the S3 output variant can publish to it.
+# [stores.media]
+#
+# # Required bucket name. Credentials must permit the operations this deployment performs.
+# bucket = "preview-assets"
+#
+# # Provider region. Keep it consistent with the chosen endpoint and bucket.
+# region = "us-east-1"
+#
+# # Optional provider endpoint. Omit to use the dependency's normal AWS S3 endpoint selection.
+# endpoint = "https://s3.example.com"
+#
+# # false uses path-style bucket addressing; true uses bucket.hostname addressing.
+# # Select the style supported by the provider's DNS and TLS configuration.
+# virtual_hosted_style = false
+#
+# # Permit plain HTTP for THIS store? false requires HTTPS.
+# # inputs.allow_http does not change S3 endpoint access.
+# allow_http = false
+#
+# # Environment variable NAME for the access key ID. Do not put the key value in this file.
+# # Set access and secret together; when both are absent, supported role providers may supply credentials.
+# access_key_env = "AWS_ACCESS_KEY_ID"
+#
+# # Environment variable NAME for the secret access key. A missing partner key is a configuration error.
+# secret_key_env = "AWS_SECRET_ACCESS_KEY"
+#
+# # Environment variable NAME for an optional temporary-credential session token.
+# # Leave the actual variable unset when temporary credentials are not being used.
+# session_token_env = "AWS_SESSION_TOKEN"
+
+
+# --- Alternative S3 output ---
+# Replace the active [output] block above with this complete block; do not enable both blocks.
+# [output]
+#
+# # Publish to an S3-compatible store instead of a local directory.
+# kind = "s3"
+#
+# # Must match an existing name under [stores.NAME].
+# store = "media"
+#
+# # Object-key prefix inside the bucket. An empty string writes at the bucket root.
+# prefix = "previews"
+#
+# # Signed download link lifetime, in whole seconds: 1..604800 (seven days).
+# # Independent of cache expiry; temporary credentials can expire before the requested link lifetime.
+# signed_url_seconds = 300

@@ -1,0 +1,6 @@
+/target/
+/.pipeline/
+/config.local.toml
+/.env
+/.env.*
+*.sqlite*
