@@ -1,0 +1,10 @@
+.git
+target
+.pipeline
+config.local.toml
+.env
+.env.*
+media
+backups
+*.sqlite*
+*.log

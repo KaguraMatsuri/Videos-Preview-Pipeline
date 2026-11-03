@@ -1,0 +1,35 @@
+name: videos-preview-pipeline
+
+services:
+  pipeline:
+    build: .
+    image: videos-preview-pipeline:local
+    init: true
+    read_only: true
+    cpus: 1.0
+    mem_limit: 512m
+    environment:
+      PREVIEW_API_TOKEN: ${PREVIEW_API_TOKEN:?server token environment variable is missing or empty}
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - type: bind
+        source: ./config.local.toml
+        target: /etc/preview/pipeline.toml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./media
+        target: /media
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: pipeline-data
+        target: /work/.pipeline
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+
+volumes:
+  pipeline-data:

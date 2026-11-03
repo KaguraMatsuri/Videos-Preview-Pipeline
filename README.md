@@ -3,7 +3,14 @@
 A video-to-GIF pipeline built with Rust and FFmpeg, designed to deliver high performance,
 configurability, and flexible integration.
 
+For a standalone HTTP service, start with [Docker Compose](#docker-compose).
+For application integration, see the [HTTP and Rust examples](docs/api.md).
+
 ## Requirements
+
+Docker deployment requires Docker Engine with Docker Compose. The image contains
+the program, FFmpeg and FFprobe; Rust is only used in its build stage.
+The following requirements apply to native builds:
 
 - Rust, installed through rustup. The project pins `1.99.1` in
   [rust-toolchain.toml](rust-toolchain.toml).
@@ -134,7 +141,71 @@ start workers: choose one of these modes for a database. Other processes may use
 
 ## Deployment
 
-### Prepare the runtime directory
+### Docker Compose
+
+On the first installation, prepare a local configuration and input directory:
+
+```sh
+cp configs/pipeline.toml config.local.toml
+mkdir -p media
+```
+
+Provide your secret as the `PREVIEW_API_TOKEN` environment variable using your
+deployment's secret configuration. Compose rejects an unset or empty token.
+Start the service from the repository root:
+
+```sh
+docker compose config --quiet
+docker compose up -d --build pipeline
+```
+
+This builds `videos-preview-pipeline:local` from source. No prebuilt registry image
+is published. The runtime uses UID/GID `10001:10001`, a read-only root filesystem,
+and an initial resource budget of 1 CPU and 512 MiB. Change `cpus` and `mem_limit`
+in [compose.yaml](compose.yaml) for your workload; these limits are separate from
+the media limits in `config.local.toml`.
+
+The service is reachable at `http://127.0.0.1:8787` on the host. Put input videos
+in `media/`; the service sees them under `/media/` through a read-only mount.
+The local configuration is also mounted read-only. Ensure the mounted configuration
+and input files are readable by UID/GID `10001:10001` in the container. The named volume
+`videos-preview-pipeline_pipeline-data` retains the database, temporary directory
+and GIF artifacts at `/work/.pipeline`. Keep the Compose project name consistent
+when upgrading. `config.local.toml`, `media/` and `backups/` are excluded from Git
+and the image build context.
+
+The image supplies these deployment-specific environment overrides:
+
+| Variable | Value / purpose |
+| --- | --- |
+| `PREVIEW__SERVER__LISTEN` | `0.0.0.0:8787` inside the container; Compose publishes only to host loopback |
+| `PREVIEW__SERVER__TOKEN_ENV` | `PREVIEW_API_TOKEN`, the name of the required secret variable |
+| `PREVIEW__INPUTS__LOCAL_ROOTS` | `/media`, the mounted input directory |
+
+Override these variables in Compose to change them; they take precedence over
+the corresponding TOML fields. Other settings remain configurable in
+`config.local.toml`. Keep the container's working directory and data mount aligned
+if you change the runtime paths. The project's MIT license covers its own code;
+FFmpeg and other image dependencies retain their respective licenses.
+
+From a shell with the same token, check the service and inspect its logs:
+
+```sh
+curl --fail \
+  -H "Authorization: Bearer ${PREVIEW_API_TOKEN}" \
+  http://127.0.0.1:8787/health
+docker compose logs --tail 100 pipeline
+```
+
+Use the [HTTP examples](docs/api.md) to submit a video and download its GIF.
+Stop with `docker compose stop pipeline`. Preserve your local configuration and
+data volume; follow the [upgrade and rollback guide](docs/updates.md) for updates.
+No automatic restart policy is configured: inspect a failed container's logs and
+resolve the cause before starting it again.
+
+### Native deployment
+
+#### Prepare the runtime directory
 
 Build for the deployment host's operating system and architecture. The runtime
 host needs the compiled binary, its configuration, FFmpeg and FFprobe; it does
@@ -156,7 +227,7 @@ Keep that directory on persistent local storage and grant the service account
 write access. SQLite should not be placed on a shared network filesystem.
 Adjust `inputs.local_roots` and the output location for your deployment.
 
-### Start the HTTP service
+#### Start the HTTP service
 
 Provide your secret token through the `PREVIEW_API_TOKEN` environment variable
 using your deployment's secret configuration, then start the service:
@@ -188,7 +259,7 @@ The example binds to loopback. For an external listener, change
 `PREVIEW__SERVER__LISTEN` and keep token authentication enabled. The service
 speaks HTTP; use a TLS-terminating proxy for HTTPS access.
 
-### Process management and persistent data
+#### Process management and persistent data
 
 - Run either `serve` or `worker` under your process supervisor, with a fixed
   working directory and the same configuration and environment on every start.
@@ -200,6 +271,21 @@ speaks HTTP; use a TLS-terminating proxy for HTTPS access.
   Stop all database writers before copying the data directory for a backup.
 - Cache expiry triggers regeneration on demand; it does not delete old artifacts.
   Account for input staging, concurrent jobs and retained GIFs when sizing storage.
+
+## Integration and upgrades
+
+- [HTTP requests, responses, errors and Rust library integration](docs/api.md)
+- [Release notifications, upgrades, backups and rollback conditions](docs/updates.md)
+- [Runnable Rust library example](examples/library.rs)
+
+With `input.mp4` in the repository root, the Rust example uses the same
+configuration and request as the CLI quick start:
+
+```sh
+cargo run --locked --example library -- \
+  --config configs/pipeline.toml \
+  --request examples/job.json
+```
 
 ## Verification
 
